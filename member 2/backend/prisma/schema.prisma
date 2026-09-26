@@ -1,0 +1,364 @@
+// StockSense — Prisma schema
+//
+// Foundation models (ProductCategory, Product, Warehouse, Location, Stock,
+// AdjustmentReason) are owned by MEMBER 1 in the target architecture. They
+// are included here, matching the current field names 1:1, ONLY so that
+// Member 2's operations work standalone until Member 1's backend lands.
+// When Member 1's schema is ready, drop these models here and point the
+// foreign keys at their tables (or split into a shared schema/service).
+//
+// Member 2 owns everything below the "OPERATIONS" divider — Receipt,
+// Delivery, Transfer, Adjustment, and StockMovement (the ledger consumed
+// later by Member 3).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── FOUNDATION (placeholder — Member 1 owns this in the final system) ──
+
+model ProductCategory {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  products    Product[]
+
+  @@map("product_categories")
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  sku         String   @unique
+  name        String
+  description String?
+  categoryId  String?  @map("category_id")
+  unit        String   @default("unit")
+  barcode     String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  category           ProductCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  stock              Stock[]
+  stockMovements     StockMovement[]
+  receiptItems       ReceiptItem[]
+  deliveryItems      DeliveryItem[]
+  transferItems      TransferItem[]
+  adjustments        Adjustment[]
+  reorderRules       ReorderRule[]
+  intelligenceActions IntelligenceAction[]
+
+  @@map("products")
+}
+
+model Warehouse {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  address   String?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  locations           Location[]
+  receipts            Receipt[]
+  deliveries          Delivery[]
+  stockMovements      StockMovement[]
+  reorderRules        ReorderRule[]
+  intelligenceActions IntelligenceAction[]
+
+  @@map("warehouses")
+}
+
+model Location {
+  id          String   @id @default(uuid())
+  warehouseId String   @map("warehouse_id")
+  code        String
+  name        String
+  zone        String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  stock     Stock[]
+
+  receiptsAsLocation   Receipt[]  @relation("ReceiptLocation")
+  deliveriesAsLocation Delivery[] @relation("DeliveryLocation")
+
+  transfersAsSource      Transfer[] @relation("TransferSource")
+  transfersAsDestination Transfer[] @relation("TransferDestination")
+
+  adjustments Adjustment[]
+
+  movementsAsLocation    StockMovement[] @relation("MovementLocation")
+  movementsAsSource      StockMovement[] @relation("MovementSource")
+  movementsAsDestination StockMovement[] @relation("MovementDestination")
+  intelligenceActions    IntelligenceAction[]
+
+  @@unique([warehouseId, code])
+  @@map("locations")
+}
+
+model Stock {
+  id         String   @id @default(uuid())
+  productId  String   @map("product_id")
+  locationId String   @map("location_id")
+  quantity   Int      @default(0)
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, locationId])
+  @@map("stock")
+}
+
+model AdjustmentReason {
+  id          String  @id @default(uuid())
+  name        String  @unique
+  description String?
+
+  adjustments Adjustment[]
+
+  @@map("adjustment_reasons")
+}
+
+// ── OPERATIONS (Member 2 owns everything below) ─────────────────────────
+
+enum OperationStatus {
+  draft
+  waiting
+  ready
+  done
+  canceled
+}
+
+model Receipt {
+  id           String          @id @default(uuid())
+  reference    String          @unique
+  supplierName String?         @map("supplier_name")
+  warehouseId  String?         @map("warehouse_id")
+  locationId   String?         @map("location_id")
+  status       OperationStatus @default(draft)
+  notes        String?
+  createdBy    String?         @map("created_by")
+  validatedBy  String?         @map("validated_by")
+  validatedAt  DateTime?       @map("validated_at")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @default(now()) @updatedAt @map("updated_at")
+
+  warehouse Warehouse?    @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  location  Location?     @relation("ReceiptLocation", fields: [locationId], references: [id], onDelete: SetNull)
+  items     ReceiptItem[]
+
+  @@map("receipts")
+}
+
+model ReceiptItem {
+  id        String   @id @default(uuid())
+  receiptId String   @map("receipt_id")
+  productId String   @map("product_id")
+  quantity  Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  receipt Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@map("receipt_items")
+}
+
+model Delivery {
+  id           String          @id @default(uuid())
+  reference    String          @unique
+  customerName String?         @map("customer_name")
+  warehouseId  String?         @map("warehouse_id")
+  locationId   String?         @map("location_id")
+  status       OperationStatus @default(draft)
+  notes        String?
+  createdBy    String?         @map("created_by")
+  validatedBy  String?         @map("validated_by")
+  validatedAt  DateTime?       @map("validated_at")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @default(now()) @updatedAt @map("updated_at")
+
+  warehouse Warehouse?     @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  location  Location?      @relation("DeliveryLocation", fields: [locationId], references: [id], onDelete: SetNull)
+  items     DeliveryItem[]
+
+  @@map("deliveries")
+}
+
+model DeliveryItem {
+  id           String @id @default(uuid())
+  deliveryId   String @map("delivery_id")
+  productId    String @map("product_id")
+  requestedQty Int    @map("requested_qty")
+  pickedQty    Int    @default(0) @map("picked_qty")
+  packedQty    Int    @default(0) @map("packed_qty")
+
+  delivery Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@map("delivery_items")
+}
+
+model Transfer {
+  id                    String          @id @default(uuid())
+  reference             String          @unique
+  sourceLocationId      String          @map("source_location_id")
+  destinationLocationId String          @map("destination_location_id")
+  status                OperationStatus @default(draft)
+  notes                 String?
+  createdBy             String?         @map("created_by")
+  validatedBy           String?         @map("validated_by")
+  validatedAt           DateTime?       @map("validated_at")
+  createdAt             DateTime        @default(now()) @map("created_at")
+  updatedAt             DateTime        @default(now()) @updatedAt @map("updated_at")
+
+  sourceLocation      Location       @relation("TransferSource", fields: [sourceLocationId], references: [id])
+  destinationLocation Location       @relation("TransferDestination", fields: [destinationLocationId], references: [id])
+  items               TransferItem[]
+
+  @@map("transfers")
+}
+
+model TransferItem {
+  id         String @id @default(uuid())
+  transferId String @map("transfer_id")
+  productId  String @map("product_id")
+  quantity   Int
+
+  transfer Transfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@map("transfer_items")
+}
+
+model Adjustment {
+  id           String          @id @default(uuid())
+  reference    String          @unique
+  productId    String          @map("product_id")
+  locationId   String          @map("location_id")
+  recordedQty  Int             @map("recorded_qty")
+  physicalQty  Int             @map("physical_qty")
+  difference   Int
+  reasonId     String?         @map("reason_id")
+  reasonName   String?         @map("reason_name")
+  notes        String?
+  status       OperationStatus @default(draft)
+  createdBy    String?         @map("created_by")
+  validatedBy  String?         @map("validated_by")
+  validatedAt  DateTime?       @map("validated_at")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @default(now()) @updatedAt @map("updated_at")
+
+  product  Product           @relation(fields: [productId], references: [id], onDelete: Restrict)
+  location Location          @relation(fields: [locationId], references: [id], onDelete: Restrict)
+  reason   AdjustmentReason? @relation(fields: [reasonId], references: [id], onDelete: SetNull)
+
+  @@map("adjustments")
+}
+
+enum MovementType {
+  receipt
+  delivery
+  transfer
+  adjustment
+}
+
+model StockMovement {
+  id                     String       @id @default(uuid())
+  operationType          MovementType @map("operation_type")
+  reference              String
+  productId              String       @map("product_id")
+  sku                    String
+  quantityChange         Int          @map("quantity_change")
+  quantityBefore         Int          @map("quantity_before")
+  quantityAfter          Int          @map("quantity_after")
+  warehouseId            String?      @map("warehouse_id")
+  locationId             String?      @map("location_id")
+  sourceLocationId       String?      @map("source_location_id")
+  destinationLocationId  String?      @map("destination_location_id")
+  userEmail              String?      @map("user_email")
+  reason                 String?
+  operationStatus        String       @default("done") @map("operation_status")
+  createdAt              DateTime     @default(now()) @map("created_at")
+
+  product             Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  warehouse           Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  location            Location?  @relation("MovementLocation", fields: [locationId], references: [id], onDelete: SetNull)
+  sourceLocation      Location?  @relation("MovementSource", fields: [sourceLocationId], references: [id], onDelete: SetNull)
+  destinationLocation Location?  @relation("MovementDestination", fields: [destinationLocationId], references: [id], onDelete: SetNull)
+
+  @@map("stock_movements")
+}
+
+// ── INTELLIGENCE (Member 3 owns everything below) ────────────────────────
+
+// Placeholder ReorderRule — Member 1 will own this in the final system.
+// Included here so Smart Reorder service can read thresholds without crashing.
+model ReorderRule {
+  id           String   @id @default(uuid())
+  productId    String   @map("product_id")
+  warehouseId  String?  @map("warehouse_id")
+  reorderPoint Int      @map("reorder_point")
+  reorderQty   Int      @map("reorder_qty")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  product   Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+
+  @@unique([productId, warehouseId])
+  @@map("reorder_rules")
+}
+
+enum ActionStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+enum ActionPriority {
+  CRITICAL
+  NEEDS_REVIEW
+  INFORMATION
+}
+
+enum ActionType {
+  REORDER_RECOMMENDED
+  ANOMALY_DETECTED
+  INVESTIGATION_REQUIRED
+  LOW_STOCK
+  OUT_OF_STOCK
+}
+
+model IntelligenceAction {
+  id                String         @id @default(uuid())
+  type              ActionType
+  priority          ActionPriority
+  title             String
+  description       String
+  source            String
+  status            ActionStatus   @default(OPEN)
+  productId         String?        @map("product_id")
+  warehouseId       String?        @map("warehouse_id")
+  locationId        String?        @map("location_id")
+  referenceId       String?        @map("reference_id")
+  recommendedAction String?        @map("recommended_action")
+  resolvedAt        DateTime?      @map("resolved_at")
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @default(now()) @updatedAt @map("updated_at")
+
+  product   Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  location  Location?  @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@map("intelligence_actions")
+}
+
