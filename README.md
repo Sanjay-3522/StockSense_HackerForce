@@ -140,29 +140,20 @@ Warehouse
 StockSense is built around the following principles:
 
 Centralized
-
 All inventory information is maintained within a single system.
 
 Traceable
-
 Every stock-changing operation can be traced through the movement history.
 
 Operational
-
 The system focuses on real inventory workflows rather than only displaying information.
 
 Intelligent
-
 Inventory data is analyzed to identify risks, discrepancies, anomalies, and potential actions.
 
 Human-Centered
-
 The system provides recommendations and actionable information while keeping final operational decisions with the user.
 
 Scalable
-
 The architecture separates the foundation, inventory operations, and intelligence layers so additional capabilities can be integrated without redesigning the entire platform.
-    ├── Location / Rack A
-    ├── Location / Rack B
-    └── Location / Rack C
-    ```text
+
